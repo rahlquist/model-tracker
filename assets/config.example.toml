@@ -1,0 +1,26 @@
+# model-tracker configuration template
+# Copy to ~/.model-tracker/config.toml and edit. Override the path with --config.
+
+# Storage backend: one of "csv", "sqlite", "postgres"
+[storage]
+backend = "csv"
+
+# For CSV: a directory holding one file per table.
+[storage.csv]
+data_dir = "~/.model-tracker/data"
+
+# For SQLite: a single database file.
+[storage.sqlite]
+db_path = "~/.model-tracker/data/model-tracker.sqlite"
+
+# For PostgreSQL: connection string.
+# Prefer the env var MODEL_TRACKER_PG_DSN over putting credentials here.
+# [storage.postgres]
+# dsn = "postgresql://user:pass@host:5432/dbname"
+
+# Ranking weights/constants (optional overrides)
+[ranking]
+USAGE_WEIGHT = 1.0
+PENALTY_INCOMPLETE = 2.0
+PENALTY_ERRORS = 1.0
+EXCLUDE_INCOMPLETE = true
