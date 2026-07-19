@@ -57,34 +57,74 @@ db_path = "~/.model-tracker/data/model-tracker.sqlite"
 
 ### PostgreSQL (credentials)
 
-PostgreSQL credentials never go in the config file. Use secret references — strings
-starting with `$` that are resolved at `load_config()` time:
+**Keep your database password out of the config file.** The config file can be accidentally committed to git, read by other people, or copied around. Instead, model-tracker looks up your password from a secure vault at runtime.
 
-| Format | What it reads | Example |
-|---|---|---|
-| `$BWS:<uuid>` | Bitwarden Secrets Manager secret by UUID | `$BWS:2e16ef0f-0349-4351-97cf-b485011b640b` |
-| `$HERMES_SECRET:<key>` | `HERMES_SECRET_<KEY>` env var (uppercased) | `$HERMES_SECRET:pg_dsn` → `HERMES_SECRET_PG_DSN` |
-| `""` (empty string) | `MODEL_TRACKER_PG_DSN` environment variable | `dsn = ""` |
+**How it works — the simple version:**
+1. You save your database connection string (server, username, password) in your password manager (Bitwarden) or as an environment variable.
+2. In your config file, you just put a reference — like a pointer — that says "look up the password in Bitwarden."
+3. When model-tracker starts, it secretly fetches the real credentials from Bitwarden before connecting. The config file never contains your password.
 
-**Resolution order:** config value → env var → raise if none found.
+**Step by step — if you're using Bitwarden:**
 
-**Bitwarden setup:**
-1. Store the DSN as a secret in Bitwarden (field name doesn't matter, just the value).
-2. Get the secret's UUID: `bws secret list <project-uuid>`
-3. Put `$BWS:<that-uuid>` in config.toml.
+1. Open Bitwarden and create a new "Secret" entry for your PostgreSQL connection. It can be called anything — "postgres-dsn" or "database" or "db-password" — doesn't matter. Just put your full connection string as the value:
+   ```
+   postgresql://modeltracker:secretpass@192.168.8.249:5432/modeltracker
+   ```
 
-Example config:
+2. Find the secret's UUID (a long unique ID). Open a terminal and run:
+   ```bash
+   bws secret list <your-project-uuid>
+   ```
+   You'll see output like:
+   ```
+   UUID                                 NAME
+   2e16ef0f-0349-...  postgres-dsn
+   ```
+   Copy the UUID (the `2e16ef0f-0349-...` part).
+
+3. Put that UUID in your config file:
+   ```toml
+   [storage]
+   backend = "postgres"
+   [storage.postgres]
+   dsn = "$BWS:2e16ef0f-0349-4351-97cf-b485011b640b"
+   ```
+   The `$BWS:` prefix tells model-tracker: "Go get this from Bitwarden."
+
+**Alternative — if you're using environment variables instead:**
+
+If you prefer not to use Bitwarden, you can put the DSN in an environment variable instead:
+
 ```toml
 [storage]
 backend = "postgres"
 [storage.postgres]
-dsn = "$BWS:2e16ef0f-0349-4351-97cf-b485011b640b"  # Bitwarden secret
-# dsn = "$HERMES_SECRET:pg_dsn"                       # env var HERMES_SECRET_PG_DSN
-# dsn = ""                                            # env var MODEL_TRACKER_PG_DSN
+dsn = "$HERMES_SECRET:pg_dsn"   # reads HERMES_SECRET_PG_DSN from your environment
 ```
 
-**Note:** any string in any config section can be a secret reference — not just the DSN.
-`$BWS:` and `$HERMES_SECRET:` work anywhere in the TOML.
+Then set it in your shell or systemd service file:
+```bash
+export HERMES_SECRET_PG_DSN="postgresql://modeltracker:pass@host:5432/modeltracker"
+```
+
+**Alternative — just leave it empty:**
+
+If you set the `MODEL_TRACKER_PG_DSN` environment variable, you can leave the config empty and model-tracker will use that:
+
+```toml
+[storage.postgres]
+dsn = ""  # will read MODEL_TRACKER_PG_DSN from environment
+```
+
+**The three options at a glance:**
+
+| Method | Where the password lives | Config looks like |
+|---|---|---|
+| Bitwarden | Your password vault | `dsn = "$BWS:uuid-here"` |
+| Environment variable (HERMES_SECRET) | Your shell/system | `dsn = "$HERMES_SECRET:pg_dsn"` |
+| Environment variable (MODEL_TRACKER_PG_DSN) | Your shell/system | `dsn = ""` |
+
+**Important:** This secret reference syntax works for *any* config value, not just the PostgreSQL DSN. If any value in your config.toml starts with `$BWS:` or `$HERMES_SECRET:`, it will be resolved securely before use.
 
 ### Auto-record at session start
 
