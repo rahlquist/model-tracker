@@ -70,7 +70,7 @@ If `--model-id` omitted, prompt for an alias/name to look the model up. Rating 1
 
 ### edit-note
 `edit-note <note_id> --note "revised" --rating 10`
-Updates `user_notes` / `user_rating` only. **Cannot** modify `agent_rating` (the command rejects it).
+Updates `user_notes` / `user_rating` only. **Cannot** modify `agent_rating` (the command rejects it). After any `edit` or `edit-note` that changes `user_rating`, run `rank` again to refresh the derived `agent_rating` values — otherwise `rank` will report stale scores.
 
 ### edit (any table/column)
 `edit <table> <id> --set col=value [--set col2=value2]`
@@ -108,10 +108,9 @@ FKs server-side.
 
 ## Common edge cases
 - **Resuming after a crash mid-`record-session`:** already-written rows are safe; re-run `record-session` and reuse the existing `system_info` (the prompt offers the most recent one).
-    1. **Check what was written:** `cat ~/.model-tracker/data/*.csv` (CSV data dir) or `sqlite3 ~/.model-tracker/data/model-tracker.sqlite '.tables'` (SQLite DB)
-    2. **For CSV:** rows are safe at insert time (fsync-per-write) so no transaction rollback needed
-    3. **For SQLite:** run `PRAGMA integrity_check;` to confirm WAL consistency after a crash
-    4. **Resume:** re-run `record-session` — if the system is unchanged, list existing rows with `list system_info` and reuse the most recent row (or update it with `edit system_info <id> --set os_make_version=...` if hardware changed).
+    1. **Check what was written:** use `list system_info --json` and `list system_config --json` (or whichever tables were partially written) to see existing rows. For raw inspection, the data dir is configured in `config.toml` — the `[storage]` section sets `backend`, and `[storage.csv]`/`[storage.sqlite]`/`[storage.postgres]` sets the data location (`data_dir`, `db_path`, or `dsn`). Inspect the appropriate path from your config.
+    2. **For SQLite:** run `PRAGMA integrity_check;` to confirm WAL consistency after a crash
+    3. **Resume:** re-run `record-session` — if the system is unchanged, list existing rows with `list system_info` and reuse the most recent row (or update it with `edit system_info <id> --set os_make_version=...` if hardware changed).
 - **Model with no notes:** appears in `rank` as `unranked` (NULL `agent_rating`); it simply has no basis yet.
-- **Incomplete run:** with default `EXCLUDE_INCOMPLETE=true`, its notes are excluded from `base`; if that leaves no eligible notes, the model is unranked (but penalties from the linked run still apply to others? No — penalties apply to the model whose linked run is incomplete/errored).
+- **Incomplete run:** with default `EXCLUDE_INCOMPLETE=true`, its notes are excluded from `base`; if that leaves no eligible notes, the model is unranked. Penalties from incomplete or errored runs apply only to the model whose linked runs have those flags — they never affect other models.
 - **Switching backends:** point `config.toml` at a different backend; data is not auto-migrated between backends.
