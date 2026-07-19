@@ -34,19 +34,46 @@ comparable picture — instead of a fading memory of "I think opus was good."
 
 ## Install
 
-The skill is a portable directory. Copy it into your agent's skills folder, or
-just run the scripts directly:
+There are two ways to get model-tracker:
 
-```bash
-# 1. pick a backend
-cp assets/config.example.toml ~/.model-tracker/config.toml
-#    edit: backend = "csv" | "sqlite" | "postgres"
+### 1. Clone from GitHub (recommended)
 
-# 2. run operations
-python3 scripts/tracker.py --config ~/.model-tracker/config.toml record-session
-python3 scripts/tracker.py --config ~/.model-tracker/config.toml add-note
-python3 scripts/tracker.py --config ~/.model-tracker/config.toml rank
-```
+This downloads everything — the script, the config template, and all supporting files:
+
+1. Open a terminal and run:
+   ```bash
+   git clone https://github.com/rahlquist/model-tracker.git
+   ```
+
+2. Copy the files into your Hermes skills directory:
+   ```bash
+   mkdir -p ~/.hermes/skills/model-tracker
+   cp -r model-tracker/scripts/* ~/.hermes/skills/model-tracker/
+   mkdir -p ~/.model-tracker
+   cp model-tracker/assets/config.example.toml ~/.model-tracker/config.toml
+   ```
+
+3. Run the setup wizard — it will ask you five questions and write your config:
+   ```bash
+   python3 ~/.hermes/skills/model-tracker/scripts/tracker.py setup
+   ```
+
+### 2. Copy manually
+
+If you already have the files (e.g., you downloaded a zip or have them elsewhere):
+
+1. Pick your backend (CSV, SQLite, or PostgreSQL) in the config file:
+   ```bash
+   cp assets/config.example.toml ~/.model-tracker/config.toml
+   #    edit: backend = "csv" | "sqlite" | "postgres"
+   ```
+
+2. Run operations:
+   ```bash
+   python3 scripts/tracker.py --config ~/.model-tracker/config.toml record-session
+   python3 scripts/tracker.py --config ~/.model-tracker/config.toml add-note
+   python3 scripts/tracker.py --config ~/.model-tracker/config.toml rank
+   ```
 
 **Requirements:** Python 3.10+. The CSV and SQLite backends use only the
 standard library (`sqlite3`, and `tomllib` on 3.11+). The PostgreSQL backend
