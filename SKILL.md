@@ -55,14 +55,36 @@ data_dir = "~/.model-tracker/data"
 [storage.sqlite]
 db_path = "~/.model-tracker/data/model-tracker.sqlite"
 
-# For PostgreSQL: no credentials in config. Use secret references.
-#   dsn = "$BWS:uuid-of-your-secret"      (Bitwarden)
-#   dsn = "$HERMES_SECRET:pg_dsn"          (env var HERMES_SECRET_PG_DSN)
-#   dsn = ""                                (env var MODEL_TRACKER_PG_DSN)
-# [storage.postgres]
-# dsn = "$BWS:your-postgres-secret-uuid"
+### PostgreSQL (credentials)
+
+PostgreSQL credentials never go in the config file. Use secret references — strings
+starting with `$` that are resolved at `load_config()` time:
+
+| Format | What it reads | Example |
+|---|---|---|
+| `$BWS:<uuid>` | Bitwarden Secrets Manager secret by UUID | `$BWS:2e16ef0f-0349-4351-97cf-b485011b640b` |
+| `$HERMES_SECRET:<key>` | `HERMES_SECRET_<KEY>` env var (uppercased) | `$HERMES_SECRET:pg_dsn` → `HERMES_SECRET_PG_DSN` |
+| `""` (empty string) | `MODEL_TRACKER_PG_DSN` environment variable | `dsn = ""` |
+
+**Resolution order:** config value → env var → raise if none found.
+
+**Bitwarden setup:**
+1. Store the DSN as a secret in Bitwarden (field name doesn't matter, just the value).
+2. Get the secret's UUID: `bws secret list <project-uuid>`
+3. Put `$BWS:<that-uuid>` in config.toml.
+
+Example config:
+```toml
+[storage]
+backend = "postgres"
+[storage.postgres]
+dsn = "$BWS:2e16ef0f-0349-4351-97cf-b485011b640b"  # Bitwarden secret
+# dsn = "$HERMES_SECRET:pg_dsn"                       # env var HERMES_SECRET_PG_DSN
+# dsn = ""                                            # env var MODEL_TRACKER_PG_DSN
 ```
-PostgreSQL DSN also honors the `MODEL_TRACKER_PG_DSN` environment variable.
+
+**Note:** any string in any config section can be a secret reference — not just the DSN.
+`$BWS:` and `$HERMES_SECRET:` work anywhere in the TOML.
 
 ### Auto-record at session start
 
