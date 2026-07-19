@@ -10,6 +10,18 @@ metadata:
 
 Track the models you use in agentic AI tools and see which ones really shine.
 
+### What's in the box?
+
+A single Python script (`scripts/tracker.py`) that does everything — no packages to install, no complicated setup. You get:
+
+- **Session recorder** — logs which AI models you used, how many turns you took, and whether the session went well
+- **Notes and ratings** — write comments about how a model felt, rate it from 1–10
+- **Automatic ranking** — the tool calculates which models you rely on most, based on actual usage weighted by how well they worked
+- **Auto-detection** — automatically records your computer's OS, CPU, and RAM so you don't have to type it in
+- **One-time setup wizard** — answers five questions and creates your config file for you
+
+It stores everything in a simple file (CSV), a SQLite database, or a PostgreSQL server — you choose. No cloud, no accounts, no telemetry. Your data stays on your machine.
+
 ## What it does
 
 - `setup` — interactive one-time wizard that walks you through backend choice, data paths, auto-record settings, and turn-check-in thresholds. Generates `~/.model-tracker/config.toml`.
@@ -21,6 +33,46 @@ Track the models you use in agentic AI tools and see which ones really shine.
 - `rank` — computes a usage-weighted `agent_rating` per model, writes it back, and prints a report (plain-text or `--markdown`).
 
 Everything flows through a driver registry — the CLI never imports a concrete backend directly.
+
+## Installation
+
+This is a skill for the Hermes Agent desktop app. Here's how to get it:
+
+### Option A — Install through the Hermes app (easiest)
+
+If your Hermes app has the skill install command available:
+
+```bash
+hermes skills install rahlquist/model-tracker
+```
+
+### Option B — Clone from GitHub manually
+
+If the command above doesn't work, or if you prefer to do it yourself:
+
+1. **Download the code.** Open a terminal and run:
+   ```bash
+   git clone https://github.com/rahlquist/model-tracker.git
+   ```
+
+2. **Copy the files into Hermes.** Copy the `scripts/` folder into your Hermes skills directory:
+   ```bash
+   mkdir -p ~/.hermes/skills/model-tracker
+   cp -r scripts/* ~/.hermes/skills/model-tracker/
+   ```
+
+3. **Copy the example config.** This gives you a starting point you can edit:
+   ```bash
+   cp assets/config.example.toml ~/.model-tracker/config.toml
+   mkdir -p ~/.model-tracker
+   ```
+
+4. **Run the setup wizard.** Answer a few questions and the app will configure everything for you:
+   ```bash
+   python3 ~/.hermes/skills/model-tracker/scripts/tracker.py setup
+   ```
+
+That's it. You're ready to track your first session.
 
 ## Quick start
 
