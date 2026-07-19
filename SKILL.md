@@ -1,6 +1,6 @@
 ---
 name: model-tracker
-description: 'Track the AI models you use across agentic sessions. Records per-session stats, system/hardware context, timestamps, freeform notes, and 1-10 user ratings into CSV, SQLite, or PostgreSQL behind one standard API; produces a usage-weighted ranking report. Use when you want to track models, log this run, capture session stats, rate a model, or generate a model ranking report.'
+description: Track models across agentic sessions. Records per-session stats, system context, timestamps, notes, and ratings into CSV/SQLite/PostgreSQL, then produces a usage-weighted ranking report. Use to track models, log runs, capture session stats, rate models, or generate model ranking reports.
 compatibility: Requires Python 3.10+; optional: sqlite3 (stdlib), psycopg (v3) for the PostgreSQL backend.
 metadata:
   version: "1.0"
