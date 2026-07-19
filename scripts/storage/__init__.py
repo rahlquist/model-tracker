@@ -8,8 +8,97 @@ from __future__ import annotations
 
 import abc
 import os
+import subprocess
 import sys
+import re
 from typing import Any, Callable, Dict, List, Optional
+
+# ---------------------------------------------------------------------------
+# Secret resolution — no credentials in config files
+# ---------------------------------------------------------------------------
+
+# Patterns: $HERMES_SECRET:key or $BWS:uuid
+_PAT_HERMES = re.compile(r'^\$HERMES_SECRET:(.+)$')
+_PAT_BWS = re.compile(r'^\$BWS:([0-9a-f-]{36})$')
+
+
+def resolve_secret(value: str) -> str:
+    """Resolve a config value that may reference secrets.
+
+    Resolution order:
+      1. Direct string (returned as-is if it doesn't start with `$`).
+      2. `$HERMES_SECRET:key` → reads `HERMES_SECRET_<key>` env var.
+      3. `$BWS:uuid` → runs `bws secret get <uuid> --output env` and evals.
+    """
+    if not isinstance(value, str) or not value.startswith("$"):
+        return value
+
+    # 1. HERMES_SECRET env var
+    m = _PAT_HERMES.match(value)
+    if m:
+        key = m.group(1)
+        env_key = f"HERMES_SECRET_{key.upper().replace('-', '_').replace('.', '_')}"
+        env_val = os.environ.get(env_key)
+        if env_val:
+            return env_val
+        raise EnvironmentError(
+            f"Secret '{key}' referenced via $HERMES_SECRET:{key} but "
+            f"env var {env_key} is not set."
+        )
+
+    # 2. Bitwarden Secrets Manager
+    m = _PAT_BWS.match(value)
+    if m:
+        uuid_str = m.group(1)
+        try:
+            proc = subprocess.run(
+                ["/home/rahlquist/.local/bin/bws", "secret", "get", uuid_str, "--output", "env"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if proc.returncode != 0:
+                raise EnvironmentError(
+                    f"bws secret get {uuid_str} failed (exit {proc.returncode}): {proc.stderr.strip()}"
+                )
+            # Output is like: export GITHUB_TOKEN="ghp_..."
+            # Extract just the value.
+            env_str = proc.stdout.strip()
+            eval_env: Dict[str, str] = {}
+            for line in env_str.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                # Strip 'export ' prefix if present.
+                if line.startswith("export "):
+                    line = line[7:]
+                eq = line.index("=")
+                key = line[:eq].strip()
+                # Extract value between quotes.
+                val = line[eq+1:].strip().strip("'\"")
+                os.environ[key] = val
+                eval_env[key] = val
+            # Return the first (and usually only) secret value found.
+            if eval_env:
+                return list(eval_env.values())[0]
+            return env_str
+        except FileNotFoundError:
+            raise EnvironmentError(
+                "bws CLI not found at /home/rahlquist/.local/bin/bws. "
+                "Cannot resolve $BWS secret."
+            )
+
+    # Unknown prefix — return raw so the caller can handle it.
+    return value
+
+
+def _resolve_secrets_recursive(obj: Any) -> Any:
+    """Walk a config dict/list and call resolve_secret() on every string value."""
+    if isinstance(obj, dict):
+        return {k: _resolve_secrets_recursive(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_secrets_recursive(item) for item in obj]
+    if isinstance(obj, str) and obj.startswith("$"):
+        return resolve_secret(obj)
+    return obj
 
 # ---------------------------------------------------------------------------
 # UUID v7 (RFC 9562)
@@ -167,6 +256,8 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     sh.setdefault("agent_make_version", "")
     sh.setdefault("hardware_details", "")
 
+    # Resolve any secret references before returning.
+    cfg = _resolve_secrets_recursive(cfg)
     return cfg
 
 
