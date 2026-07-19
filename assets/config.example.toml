@@ -13,10 +13,15 @@ data_dir = "~/.model-tracker/data"
 [storage.sqlite]
 db_path = "~/.model-tracker/data/model-tracker.sqlite"
 
-# For PostgreSQL: connection string.
-# Prefer the env var MODEL_TRACKER_PG_DSN over putting credentials here.
+# For PostgreSQL: no credentials here. Use secret references.
+# Option A — Bitwarden Secrets Manager:
+#   dsn = "$BWS:uuid-of-your-postgres-dsn-secret"
+# Option B — Environment variable:
+#   dsn = "$HERMES_SECRET:pg_dsn"   (reads HERMES_SECRET_PG_DSN)
+# Option C — env var fallback:
+#   dsn = ""                          (reads MODEL_TRACKER_PG_DSN from env)
 # [storage.postgres]
-# dsn = "postgresql://user:***@host:5432/dbname"
+# dsn = "$BWS:2e16ef0f-0349-4351-97cf-b485011b640b"
 
 # Ranking weights/constants (optional overrides)
 [ranking]

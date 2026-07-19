@@ -55,9 +55,12 @@ data_dir = "~/.model-tracker/data"
 [storage.sqlite]
 db_path = "~/.model-tracker/data/model-tracker.sqlite"
 
-# For PostgreSQL:
+# For PostgreSQL: no credentials in config. Use secret references.
+#   dsn = "$BWS:uuid-of-your-secret"      (Bitwarden)
+#   dsn = "$HERMES_SECRET:pg_dsn"          (env var HERMES_SECRET_PG_DSN)
+#   dsn = ""                                (env var MODEL_TRACKER_PG_DSN)
 # [storage.postgres]
-# dsn = "postgresql://user:pass@host:5432/modeltracker"
+# dsn = "$BWS:your-postgres-secret-uuid"
 ```
 PostgreSQL DSN also honors the `MODEL_TRACKER_PG_DSN` environment variable.
 
