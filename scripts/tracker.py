@@ -5,16 +5,23 @@ Every storage operation goes through the driver registry (storage.get_driver /
 make_driver). No operation here imports a concrete driver module.
 
 Subcommands:
-  record-session  end-of-session capture (system -> config -> models -> notes)
-  add-note        add a user_notes row for an existing model, outside any session
-  edit-note       edit user_notes/user_rating by note id (never agent_rating)
-  edit            partial update to any row in any table by table+id
-  list            list rows of a table with optional equality filters
-  show            show one row by id, resolving FK ids to readable summaries
-  rank            compute ranking report and refresh stored agent_rating
+  setup          interactive one-time setup wizard
+  auto-record    auto-detect system_info at session start
+  record-session end-of-session capture (system -> config -> models -> notes)
+  add-note       add a user_notes row for an existing model, outside any session
+  edit-note      edit user_notes/user_rating by note id (never agent_rating)
+  edit           partial update to any row in any table by table+id
+  list           list rows of a table with optional equality filters
+  show           show one row by id, resolving FK ids to readable summaries
+  rank           compute ranking report and refresh stored agent_rating
 
-Global option:
+Global options:
   --config PATH   TOML config (default ~/.model-tracker/config.toml)
+  --setup         run the interactive setup wizard (one-time, generates config)
+
+Per-session signals:
+  --run-id ID     override the recorded run_id (default: context/session id)
+  --turn-count N  set the turn count for this session
 """
 
 from __future__ import annotations
@@ -28,6 +35,8 @@ import uuid
 
 # Make the package importable regardless of CWD.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from detect import detect, detect_os, detect_agent, detect_hardware  # noqa: E402
+from setup import setup as cmd_setup  # noqa: E402
 from storage import (  # noqa: E402
     make_driver,
     load_config,
@@ -184,10 +193,11 @@ def cmd_record_session(args, driver):
     # --- system_config ---
     sc_fields = _collect("system_config", (data.get("system_config") if data else None), {
         "system_info_id": lambda: si_id,
-        "run_id": lambda: prompt("run_id", required=True),
+        "run_id": lambda: args.run_id if args.run_id else prompt("run_id", required=True),
         "run_name": lambda: prompt("run_name", ""),
         "stats": lambda: prompt("stats (verbatim dump)", ""),
-        "nturns": lambda: prompt("nturns", "0", lambda x: parse_epoch(x) or 0),
+        "nturns": lambda: args.turn_count if args.turn_count is not None \
+               else prompt("nturns", "0", lambda x: parse_epoch(x) or 0),
         "ctx_length": lambda: prompt("ctx_length", "0", lambda x: parse_epoch(x) or 0),
         "num_compressed": lambda: prompt("num_compressed", "0", lambda x: parse_epoch(x) or 0),
         "was_complete": lambda: prompt("was_complete (y/n)", "y", parse_bool),
@@ -218,6 +228,13 @@ def cmd_record_session(args, driver):
             mid = m["_id"] if "_id" in m else m
             if prompt(f"Add a note for model {mid[:8]}? (y/n)", "n", parse_bool):
                 _add_note_for_model(driver, mid)
+    
+    # Turn-based check-in: if configured and turns >= threshold, ask for rating.
+    checkin = cfg.get("checkin", {})
+    threshold = checkin.get("turn_threshold", 0)
+    if threshold > 0 and data is None:
+        _turn_checkin(driver, threshold)
+    
     print("record-session complete.")
 
 
@@ -292,6 +309,44 @@ def _add_note_for_model(driver, model_id):
         "agent_rating": None,
         "created_at": int(time.time()),
     })
+
+
+def _turn_checkin(driver, threshold: int):
+    """If configured, prompt user for a rating after N turns."""
+    # This is called at end-of-session. The threshold is in turns.
+    # We ask if the user wants to rate their experience with models used.
+    print(f"\n  --- Turn Check-In ({threshold} turns reached) ---")
+    if prompt("Want to rate your experience with the models used? (y/n)", "n", parse_bool):
+        # Show all models used in this session's config.
+        configs = driver.query("system_config", order_by="created_at")
+        if not configs:
+            return
+        
+        # Find the latest system_config (this session's).
+        sc = configs[-1]
+        sc_id = sc["id"]
+        
+        # Find all models linked to this config.
+        models = driver.query("model_info", {"system_config_id": sc_id})
+        if not models:
+            return
+        
+        for m in models:
+            mid = m["id"]
+            label = m.get("model_name") or m.get("model_alias") or mid[:8]
+            print(f"  Model: {label}")
+            if prompt(f"  Rate {label}? (y/n)", "n", parse_bool):
+                note = prompt("  Note (optional)", "")
+                rating = prompt("  Rating (1-10)", required=True, validator=parse_rating)
+                driver.insert("user_notes", {
+                    "model_info_id": mid,
+                    "user_notes": note,
+                    "user_rating": rating,
+                    "agent_rating": None,
+                    "created_at": int(time.time()),
+                })
+                print(f"  ✓ Note recorded for {label}")
+        print("  --- Check-In Complete ---")
 
 
 def cmd_add_note(args, driver):
@@ -400,6 +455,92 @@ def cmd_rank(args, driver):
 
 
 # ---------------------------------------------------------------------------
+# Auto-record at session start
+# ---------------------------------------------------------------------------
+
+def cmd_auto_record(args, driver):
+    """Auto-detect system_info at session start (new context / app launch)."""
+    cfg = load_config(args.config)
+
+    # Check if auto-record is enabled in config.
+    auto_cfg = cfg.get("auto_record", {})
+    if not auto_cfg.get("enabled", False):
+        print("Auto-record is disabled. Enable it in config.toml or run: tracker.py --setup")
+        return 0
+
+    # Check trigger mode.
+    trigger = auto_cfg.get("trigger", "new-session")
+    # For now, always run auto-record (the trigger is a flag for the agent to respect).
+
+    # Get static overrides from config (if user prefers fixed values).
+    static = cfg.get("static_hardware", {})
+    os_ver = static.get("os_make_version", "")
+    agent_ver = static.get("agent_make_version", "")
+    hw_details = static.get("hardware_details", "")
+
+    if os_ver and agent_ver and hw_details:
+        # User has static values — use them directly.
+        print("Using static hardware values from config.")
+    else:
+        # Auto-detect what we can.
+        print("Auto-detecting system information...")
+        detected = detect()
+
+        # Fill in from config overrides where available.
+        if not os_ver and detected.get("os_make_version"):
+            os_ver = detected["os_make_version"]
+            print(f"  OS: {os_ver}")
+        elif os_ver:
+            print(f"  OS: {os_ver} (static)")
+        else:
+            os_ver = prompt("OS name/version", required=True)
+            print(f"  OS: {os_ver}")
+
+        if not agent_ver and detected.get("agent_make_version"):
+            agent_ver = detected["agent_make_version"]
+            print(f"  Agent: {agent_ver}")
+        elif agent_ver:
+            print(f"  Agent: {agent_ver} (static)")
+        else:
+            agent_ver = prompt("Agent name/version", required=True)
+            print(f"  Agent: {agent_ver}")
+
+        if not hw_details and detected.get("hardware_details"):
+            hw_details = detected["hardware_details"]
+            print(f"  Hardware: {hw_details}")
+        elif hw_details:
+            print(f"  Hardware: {hw_details} (static)")
+        else:
+            hw_details = prompt("Hardware (CPU/RAM/GPU)", "")
+            print(f"  Hardware: {hw_details or '(not specified)'}")
+
+    # Create or reuse system_info.
+    recent = driver.query("system_info", order_by="created_at")
+    if recent and sys.stdin.isatty():
+        print(f"\nMost recent system_info: {recent[-1].get('os_make_version')} "
+              f"(id {recent[-1]['id'][:8]})")
+        reuse = prompt("Reuse most recent system_info? (y/n)", "y", parse_bool)
+        if reuse:
+            si_id = recent[-1]["id"]
+            print(f"  system_info reused: id={si_id[:8]}")
+            print("auto-record complete.")
+            return 0
+        else:
+            print("Creating new system_info...")
+
+    fields = {
+        "os_make_version": os_ver or None,
+        "agent_make_version": agent_ver or None,
+        "hardware_details": hw_details or None,
+        "created_at": int(time.time()),
+    }
+    sid = driver.insert("system_info", fields)
+    print(f"  system_info id={sid[:8]}")
+    print("auto-record complete. Ready for record-session.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Generic collection helper for record-session
 # ---------------------------------------------------------------------------
 
@@ -427,6 +568,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     rs = sub.add_parser("record-session", help="capture end-of-session stats")
     rs.add_argument("--from-json", default=None, help="batched input JSON file")
+    rs.add_argument("--run-id", default=None, help="override the recorded run_id")
+    rs.add_argument("--turn-count", type=int, default=None, help="set the turn count for this session")
 
     an = sub.add_parser("add-note", help="add a note for an existing model")
     an.add_argument("--model-id", default=None)
@@ -458,6 +601,12 @@ def build_parser() -> argparse.ArgumentParser:
     rk = sub.add_parser("rank", help="produce ranking report")
     rk.add_argument("--markdown", action="store_true")
 
+    # setup — one-time wizard
+    su = sub.add_parser("setup", help="interactive setup wizard")
+
+    # auto-record — auto-detect system_info at session start
+    ar = sub.add_parser("auto-record", help="auto-detect system_info at session start")
+
     return p
 
 
@@ -469,11 +618,18 @@ COMMANDS = {
     "list": cmd_list,
     "show": cmd_show,
     "rank": cmd_rank,
+    "setup": cmd_setup,
+    "auto-record": cmd_auto_record,
 }
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    
+    # Setup is a standalone wizard — no driver needed.
+    if args.command == "setup":
+        return cmd_setup()
+    
     cfg = load_config(args.config)
     backend = cfg["storage"]["backend"]
     driver = make_driver(backend, cfg)

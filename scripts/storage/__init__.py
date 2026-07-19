@@ -151,6 +151,22 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     if env_dsn:
         pg["dsn"] = env_dsn
     cfg.setdefault("ranking", {})
+
+    # --- auto_record ---
+    ar = cfg.setdefault("auto_record", {})
+    ar.setdefault("enabled", False)
+    ar.setdefault("trigger", "new-session")
+
+    # --- checkin ---
+    ch = cfg.setdefault("checkin", {})
+    ch.setdefault("turn_threshold", 0)  # 0 = disabled
+
+    # --- static_hardware ---
+    sh = cfg.setdefault("static_hardware", {})
+    sh.setdefault("os_make_version", "")
+    sh.setdefault("agent_make_version", "")
+    sh.setdefault("hardware_details", "")
+
     return cfg
 
 

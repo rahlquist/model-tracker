@@ -1,6 +1,6 @@
 ---
 name: model-tracker
-description: 'Track models across agentic sessions. Records per-session stats, system context, timestamps, notes, and ratings into CSV/SQLite/PostgreSQL, then produces a usage-weighted ranking report. Use to track models, log runs, capture session stats, rate models, or generate model ranking reports.'
+description: 'Track AI models across agentic sessions. Record system context, run stats, notes, and ratings, then generate usage-weighted ranking reports. Use to track models, log runs, capture session stats, rate models, or generate model ranking reports.'
 compatibility: 'Requires Python 3.10+; optional: sqlite3 (stdlib), psycopg (v3) for the PostgreSQL backend.'
 metadata:
   version: "1.0"
@@ -8,109 +8,225 @@ metadata:
 
 # model-tracker
 
-Track the models you use in agentic AI tools and rank them by real usage.
+Track the models you use in agentic AI tools and see which ones really shine.
 
 ## What it does
 
-- `record-session` — end-of-session capture (system → config → models → notes), each row written immediately so a crash loses at most the row in flight.
-- `add-note` / `edit-note` — manage `user_notes` outside any session.
-- `edit` — partial update to any column in any table (type-validated; rejects unknown columns; never writes derived `agent_rating`).
+- `setup` — interactive one-time wizard that walks you through backend choice, data paths, auto-record settings, and turn-check-in thresholds. Generates `~/.model-tracker/config.toml`.
+- `auto-record` — detects your OS, agent, CPU, RAM, and GPU on every new session and creates a `system_info` row (or reuses the most recent one). Prompt if anything can't be auto-detected.
+- `record-session` — end-of-session capture (system → config → models → notes). Each row is written and flushed immediately, so a crash loses at most the row in flight.
+- `add-note` / `edit-note` — manage `user_notes` outside any session. Ratings 1–10.
+- `edit` — partial update to any column in any table (type-validated, rejects unknown columns and `agent_rating`).
 - `list` / `show` — browse rows with equality filters; `show` resolves FK ids to readable summaries.
-- `rank` — computes a usage-weighted `agent_rating` per model, writes it back, prints a report (plain-text or `--markdown`).
+- `rank` — computes a usage-weighted `agent_rating` per model, writes it back, and prints a report (plain-text or `--markdown`).
 
-Storage backend is user-selectable: **CSV**, **SQLite**, or **PostgreSQL** — all behind one driver registry. No operation code references a concrete backend.
+Everything flows through a driver registry — the CLI never imports a concrete backend directly.
 
-## Setup
-
-```bash
-cp assets/config.example.toml ~/.model-tracker/config.toml
-# edit: backend = "csv" | "sqlite" | "postgres"
-```
-
-Run every operation through the CLI (also callable by an agent directly):
+## Quick start
 
 ```bash
-python3 scripts/tracker.py --config ~/.model-tracker/config.toml <subcommand> [args]
+# One-time setup — answers a few questions, writes your config
+python3 scripts/tracker.py setup
+
+# Start tracking!
+python3 scripts/tracker.py record-session --run-id my-session-1 --turn-count 24
 ```
 
-Global flag: `--config PATH` (defaults to `~/.model-tracker/config.toml`; also
-`MODEL_TRACKER_CONFIG` env). PostgreSQL DSN: `storage.postgres.dsn` or the
-`MODEL_TRACKER_PG_DSN` env var (never hardcode credentials).
+You can also batch a whole session from a JSON file:
+```bash
+python3 scripts/tracker.py record-session --from-json session-data.json
+```
 
-## Reference docs (load only when needed)
+## Configuration
 
-- `references/SCHEMA.md` — full schema for all 4 tables and all 3 backends. Load when you need column names, types, or DDL.
-- `references/STORAGE_API.md` — the driver interface contract and how to add a backend. Load **only** when adding or debugging a storage backend.
-- `references/RANKING.md` — the ranking algorithm, weights, and a worked example. Load when tuning `rank` behavior or explaining scores.
+Config lives at `~/.model-tracker/config.toml` by default. Override the path with `--config PATH` or the `MODEL_TRACKER_CONFIG` environment variable.
 
-## Operations
+### Storage backend
 
-### record-session (end of a run)
-Flow: reuse the most recent `system_info` if the system is unchanged (interactive prompt), else create one → create `system_config` (run_id, run_name, verbatim `stats`, nturns, ctx_length, num_compressed, was_complete, was_errors) → one `model_info` per model used → optionally `user_notes` per model.
+```toml
+[storage]
+backend = "csv"      # one of: csv, sqlite, postgres
 
-Interactive: `record-session` prompts for each field. Non-interactive / batched: pass `--from-json FILE` with this shape (any block may be omitted to prompt):
+# For CSV:
+[storage.csv]
+data_dir = "~/.model-tracker/data"
 
+# For SQLite:
+[storage.sqlite]
+db_path = "~/.model-tracker/data/model-tracker.sqlite"
+
+# For PostgreSQL:
+# [storage.postgres]
+# dsn = "postgresql://user:pass@host:5432/modeltracker"
+```
+PostgreSQL DSN also honors the `MODEL_TRACKER_PG_DSN` environment variable.
+
+### Auto-record at session start
+
+When enabled, `auto-record` auto-detects your OS, agent, and hardware at the start of a new session:
+
+```toml
+[auto_record]
+enabled = true
+trigger = "new-session"  # new-session | re-entry | both
+```
+
+- `new-session`: only when context is empty (app launch, new chat).
+- `re-entry`: when you re-enter a session you've previously exited.
+- `both`: always check at app startup.
+
+If auto-detection can't find a field, it prompts you interactively.
+
+### Turn-based check-in
+
+After N turns, the agent asks whether you'd like to rate your experience with the models used in this session:
+
+```toml
+[checkin]
+turn_threshold = 10  # 0 = disabled
+```
+
+### Static hardware overrides
+
+Prefer to record fixed hardware values? Set them here and skip auto-detection:
+
+```toml
+[static_hardware]
+os_make_version = "Ubuntu 24.04"
+agent_make_version = "Hermes 1.0"
+hardware_details = "CPU: AMD Ryzen 9 3900X (6 cores); 16 GB RAM"
+```
+
+### Ranking weights
+
+```toml
+[ranking]
+USAGE_WEIGHT = 1.0
+PENALTY_INCOMPLETE = 2.0
+PENALTY_ERRORS = 1.0
+EXCLUDE_INCOMPLETE = true
+```
+
+## Commands
+
+### `setup` — one-time wizard
+
+```bash
+python3 scripts/tracker.py setup
+```
+
+Walks you through:
+1. Backend choice (CSV, SQLite, or PostgreSQL)
+2. Data path
+3. PostgreSQL DSN (if PostgreSQL selected)
+4. Auto-record toggle and trigger mode
+5. Turn-check-in threshold
+6. Hardware info (static vs. auto-detect)
+
+Writes `~/.model-tracker/config.toml`. Run again at any time to reconfigure.
+
+### `auto-record` — capture system info
+
+```bash
+python3 scripts/tracker.py auto-record
+```
+
+Auto-detects OS, agent, CPU, RAM, and GPU. Creates a `system_info` row (or reuses the most recent one).
+
+### `record-session` — end-of-session capture
+
+```bash
+# Interactive — prompted for each field
+python3 scripts/tracker.py record-session
+
+# Batched from JSON
+python3 scripts/tracker.py record-session --from-json data.json
+
+# With overrides (set by Hermes via /commands)
+python3 scripts/tracker.py record-session --run-id ctx-abc123 --turn-count 24
+```
+
+Flow: reuse or create `system_info` → create `system_config` (run_id, stats, nturns, etc.) → one `model_info` per model used → optionally `user_notes` per model.
+
+JSON shape (any section may be omitted to prompt):
 ```json
 {
   "system_info": {"os_make_version": "...", "agent_make_version": "...", "hardware_details": "..."},
-  "system_config": {"run_id": "r1", "run_name": "nightly", "stats": "...", "nturns": 12,
-                    "ctx_length": 128000, "num_compressed": 1, "was_complete": true, "was_errors": ""},
-  "models": [{"model_alias": "opus", "model_name": "claude-opus", "model_context_size": 200000,
-              "model_hosted": true, "model_free": false}],
+  "system_config": {"run_id": "r1", "run_name": "nightly", "stats": "...",
+                    "nturns": 12, "ctx_length": 128000,
+                    "was_complete": true, "was_errors": ""},
+  "models": [
+    {"model_alias": "opus", "model_name": "claude-opus",
+     "model_context_size": 200000, "model_hosted": true, "model_free": false}
+  ],
   "notes": [{"model_alias": "opus", "user_notes": "great", "user_rating": 9}]
 }
 ```
 
-Each row is inserted and flushed durably as it is collected. UUID v7 ids are
-generated app-side. `agent_rating` is never written here.
+### `add-note` — add a note outside a session
 
-### add-note (no active session)
-`add-note --model-id <id> --note "text" --rating 8`
-If `--model-id` omitted, prompt for an alias/name to look the model up. Rating 1–10. Writes a `user_notes` row with `agent_rating = NULL`.
+```bash
+python3 scripts/tracker.py add-note --model-id <id> --note "text" --rating 8
+```
 
-### edit-note
-`edit-note <note_id> --note "revised" --rating 10`
-Updates `user_notes` / `user_rating` only. **Cannot** modify `agent_rating` (the command rejects it). After any `edit` or `edit-note` that changes `user_rating`, run `rank` again to refresh the derived `agent_rating` values — otherwise `rank` will report stale scores.
+Looks up the model by alias or name if `--model-id` is omitted. Rating 1–10.
 
-### edit (any table/column)
-`edit <table> <id> --set col=value [--set col2=value2]`
-Schema-validated: unknown columns rejected with a clear message; values coerced
-(bools via y/n/true/false/1/0, epochs as integers, ratings 1–10). `agent_rating`
-is rejected here — only `rank` writes it. Example:
-`edit model_info <id> --set model_context_size=256000`
+### `edit-note` — update a note's text or rating
 
-### list / show
-`list <table> [--filter col=value ...] [--order-by col] [--json]`
-`show <table> <id> [--json]` — prints the row and resolves FK ids to a readable
-summary (e.g. `system_config_id_summary: nightly`).
-Tables: `system_info`, `system_config`, `model_info`, `user_notes`.
+```bash
+python3 scripts/tracker.py edit-note <note_id> --note "revised" --rating 10
+```
 
-### rank
-`rank [--markdown]`
-Computes `agent_rating` for every model (see `references/RANKING.md`), writes it
-back to each `user_notes` row, then prints: rank, model, agent_rating, avg
-user_rating, total turns, sessions, incomplete/error flags, last use. Weights
-are configurable in `config.toml [ranking]`.
+Cannot modify `agent_rating`. After updating `user_rating`, run `rank` to refresh scores.
 
-## Input validation rules (always enforced)
-- `user_rating`: integer 1–10.
-- epoch fields: integers (Unix seconds); nulls allowed where the schema permits.
-- booleans: y/n/true/false/1/0 (lenient).
-- unknown columns: rejected with a clear message.
-- `agent_rating`: derived only; never user-entered, never writable outside `rank`.
+### `edit` — update any table/column
+
+```bash
+python3 scripts/tracker.py edit model_info <id> --set model_context_size=256000
+```
+
+Schema-validated: unknown columns are rejected; values are coerced (bools via y/n/true/false/1/0, epochs as integers, ratings 1–10). `agent_rating` is rejected here — only `rank` writes it.
+
+### `list` / `show`
+
+```bash
+python3 scripts/tracker.py list system_info [--filter col=value ...] [--order-by col] [--json]
+python3 scripts/tracker.py show system_config <id> [--json]
+```
+
+`show` resolves FK ids to readable summaries (e.g. `system_config_id_summary: nightly`).
+
+### `rank` — produce the ranking report
+
+```bash
+python3 scripts/tracker.py rank [--markdown]
+```
+
+Computes `agent_rating` for every model (see `references/RANKING.md`), writes it back, and prints a report with rank, model, scores, flags, and last use.
+
+## Input validation (always enforced)
+
+| Field | Rule |
+|---|---|
+| `user_rating` | integer 1–10 |
+| epoch fields | integers (Unix seconds); nulls allowed where the schema permits |
+| booleans | y/n/true/false/1/0 (lenient) |
+| unknown columns | rejected with a clear message |
+| `agent_rating` | derived only — never user-entered, never writable outside `rank` |
 
 ## Durability
-Every `insert`/`update` is durable before the call returns: CSV appends +
-flushes + fsyncs; SQLite commits per write under WAL; Postgres commits per
-write. An interrupted recording session loses at most the row in flight. CSV FK
-integrity is advisory (driver checks referenced ids exist); SQL backends enforce
-FKs server-side.
 
-## Common edge cases
-- **Resuming after a crash mid-`record-session`:** already-written rows are safe; re-run `record-session` and reuse the existing `system_info` (the prompt offers the most recent one).
-    1. **Check what was written:** use `list system_info --json` and `list system_config --json` (or whichever tables were partially written) to see existing rows. For raw inspection, the data dir is configured in `config.toml` — the `[storage]` section sets `backend`, and `[storage.csv]`/`[storage.sqlite]`/`[storage.postgres]` sets the data location (`data_dir`, `db_path`, or `dsn`). Inspect the appropriate path from your config.
-    2. **For SQLite:** run `PRAGMA integrity_check;` to confirm WAL consistency after a crash
-    3. **Resume:** re-run `record-session` — if the system is unchanged, list existing rows with `list system_info` and reuse the most recent row (or update it with `edit system_info <id> --set os_make_version=...` if hardware changed).
-- **Model with no notes:** appears in `rank` as `unranked` (NULL `agent_rating`); it simply has no basis yet.
-- **Incomplete run:** with default `EXCLUDE_INCOMPLETE=true`, its notes are excluded from `base`; if that leaves no eligible notes, the model is unranked. Penalties from incomplete or errored runs apply only to the model whose linked runs have those flags — they never affect other models.
-- **Switching backends:** point `config.toml` at a different backend; data is not auto-migrated between backends.
+Every `insert`/`update` is durable before the call returns: CSV appends + flushes + fsyncs; SQLite commits per write under WAL; Postgres commits per write. An interrupted recording session loses at most the row in flight.
+
+## Common gotchas
+
+- **Model with no notes** — shows as `unranked` in `rank` reports.
+- **Incomplete run** — with default `EXCLUDE_INCOMPLETE=true`, its notes are excluded from `base`; if no eligible notes remain, the model stays unranked. Penalties apply only to the affected model.
+- **Auto-detection may not find agent version** — set `agent_make_version` in `config.toml` or pass it via the `HERMES_VERSION` environment variable.
+- **PostgreSQL requires `psycopg`** — install with `pip install psycopg[binary]`. Only needed if using the `postgres` backend.
+
+## Reference docs (load when needed)
+
+- `references/SCHEMA.md` — full schema for all 4 tables and all 3 backends. Load when you need column names, types, or DDL.
+- `references/STORAGE_API.md` — the driver interface contract and how to add a backend. Load **only** when adding or debugging a storage backend.
+- `references/RANKING.md` — the ranking algorithm, weights, and a worked example. Load when tuning `rank` behavior or explaining scores.

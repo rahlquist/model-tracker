@@ -16,7 +16,7 @@ db_path = "~/.model-tracker/data/model-tracker.sqlite"
 # For PostgreSQL: connection string.
 # Prefer the env var MODEL_TRACKER_PG_DSN over putting credentials here.
 # [storage.postgres]
-# dsn = "postgresql://user:pass@host:5432/dbname"
+# dsn = "postgresql://user:***@host:5432/dbname"
 
 # Ranking weights/constants (optional overrides)
 [ranking]
@@ -24,3 +24,40 @@ USAGE_WEIGHT = 1.0
 PENALTY_INCOMPLETE = 2.0
 PENALTY_ERRORS = 1.0
 EXCLUDE_INCOMPLETE = true
+
+# ---------------------------------------------------------------------------
+# Auto-record at session start
+# ---------------------------------------------------------------------------
+# When enabled, the skill auto-detects system_info on every new session or
+# re-entry, so you don't have to manually record it.
+#
+# auto_record = true | false
+# trigger = "new-session" | "re-entry" | "both"
+#   - "new-session": only when a context is empty (app launch, new chat)
+#   - "re-entry":    when you re-enter a session you've previously exited
+#   - "both":        always check at app startup
+#
+# If detection fails for any field, the user is prompted interactively.
+[auto_record]
+enabled = false
+trigger = "new-session"
+
+# ---------------------------------------------------------------------------
+# Turn-based check-in
+# ---------------------------------------------------------------------------
+# After N turns in a session, the agent proactively asks the user whether
+# they want to add a note and rate their experience with the current model.
+# Set to 0 or omit to disable.
+[checkin]
+turn_threshold = 0  # 0 = disabled
+
+# ---------------------------------------------------------------------------
+# Static hardware overrides
+# ---------------------------------------------------------------------------
+# If you prefer to record fixed hardware values instead of auto-detecting,
+# set them here. Leave blank to use auto-detection. The setup wizard can
+# populate these for you.
+[static_hardware]
+os_make_version = ""
+agent_make_version = ""
+hardware_details = ""
