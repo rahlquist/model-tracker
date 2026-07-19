@@ -108,6 +108,10 @@ FKs server-side.
 
 ## Common edge cases
 - **Resuming after a crash mid-`record-session`:** already-written rows are safe; re-run `record-session` and reuse the existing `system_info` (the prompt offers the most recent one).
+    1. **Check what was written:** `cat ~/.model-tracker/data/*.csv` (CSV data dir) or `sqlite3 ~/.model-tracker/data/model-tracker.sqlite '.tables'` (SQLite DB)
+    2. **For CSV:** rows are safe at insert time (fsync-per-write) so no transaction rollback needed
+    3. **For SQLite:** run `PRAGMA integrity_check;` to confirm WAL consistency after a crash
+    4. **Resume:** re-run `record-session` — if the system is unchanged, list existing rows with `list system_info` and reuse the most recent row (or update it with `edit system_info <id> --set os_make_version=...` if hardware changed).
 - **Model with no notes:** appears in `rank` as `unranked` (NULL `agent_rating`); it simply has no basis yet.
 - **Incomplete run:** with default `EXCLUDE_INCOMPLETE=true`, its notes are excluded from `base`; if that leaves no eligible notes, the model is unranked (but penalties from the linked run still apply to others? No — penalties apply to the model whose linked run is incomplete/errored).
 - **Switching backends:** point `config.toml` at a different backend; data is not auto-migrated between backends.
