@@ -340,7 +340,10 @@ def cmd_edit(args, driver):
         if "=" not in kv:
             raise SystemExit(f"--set expects key=value, got '{kv}'.")
         col, _, val = kv.partition("=")
-        validate_column(table, col)
+        try:
+            validate_column(table, col)
+        except KeyError as exc:
+            raise SystemExit(str(exc))
         if col == "agent_rating":
             raise ValueError("agent_rating is derived; only `rank` may write it.")
         changes[col] = coerce_value(table, col, val)
