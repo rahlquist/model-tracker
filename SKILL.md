@@ -107,6 +107,14 @@ data_dir = "~/.model-tracker/data"
 [storage.sqlite]
 db_path = "~/.model-tracker/data/model-tracker.sqlite"
 
+### PostgreSQL — manual setup
+
+New to PostgreSQL? Read **references/POSTGRES_SETUP.md** first — it explains the
+DSN piece by piece (`postgresql://user:pass@host:port/db`), shows the exact
+`psql` commands to create the role and database, and covers the three ways to
+hand the DSN to model-tracker. The setup wizard (`tracker.py setup`) can also
+build the DSN for you interactively.
+
 ### PostgreSQL (credentials)
 
 **Keep your database password out of the config file.** The config file can be accidentally committed to git, read by other people, or copied around. Instead, model-tracker looks up your password from a secure vault at runtime.

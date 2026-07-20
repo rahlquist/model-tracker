@@ -194,6 +194,60 @@ def _minimal_toml_load(text: str) -> Dict[str, Any]:
     return root
 
 
+def load_config_raw(path: Optional[str] = None) -> Dict[str, Any]:
+    """Load config TOML only — no secret resolution.
+
+    Identical to load_config() for file reading and defaults, but does NOT
+    run _resolve_secrets_recursive(). Use this when you need the literal
+    config values (e.g. a setup wizard that must preserve a ``$BWS:``
+    reference verbatim instead of writing the resolved secret into the file).
+    """
+    candidates = []
+    if path:
+        candidates.append(path)
+    if os.environ.get("MODEL_TRACKER_CONFIG"):
+        candidates.append(os.environ["MODEL_TRACKER_CONFIG"])
+    candidates.append(os.path.expanduser("~/.model-tracker/config.toml"))
+
+    cfg: Dict[str, Any] = {}
+    for cand in candidates:
+        if cand and os.path.isfile(cand):
+            text = open(cand, "r", encoding="utf-8").read()
+            if sys.version_info >= (3, 11):
+                import tomllib
+
+                cfg = tomllib.loads(text)
+            else:
+                cfg = _minimal_toml_load(text)
+            break
+
+    # Apply defaults for anything absent (same as load_config, minus resolution).
+    storage = cfg.setdefault("storage", {})
+    storage.setdefault("backend", "csv")
+    storage.setdefault("csv", {}).setdefault(
+        "data_dir", os.path.expanduser("~/.model-tracker/data")
+    )
+    storage.setdefault("sqlite", {}).setdefault(
+        "db_path", os.path.expanduser("~/.model-tracker/data/model-tracker.sqlite")
+    )
+    storage.setdefault("postgres", {})
+    cfg.setdefault("ranking", {})
+
+    ar = cfg.setdefault("auto_record", {})
+    ar.setdefault("enabled", False)
+    ar.setdefault("trigger", "new-session")
+
+    ch = cfg.setdefault("checkin", {})
+    ch.setdefault("turn_threshold", 0)
+
+    sh = cfg.setdefault("static_hardware", {})
+    sh.setdefault("os_make_version", "")
+    sh.setdefault("agent_make_version", "")
+    sh.setdefault("hardware_details", "")
+
+    return cfg
+
+
 def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     """Load config from a TOML file.
 
